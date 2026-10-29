@@ -1,0 +1,84 @@
+#include <stdio.h>
+#include <math.h>
+
+#define OMEGA_EARTH 7.292115e-5 // Earth rotation speed (rad/s)
+
+typedef struct {
+    double x, y, z;       // Position coordinates (m)
+    double vx, vy, vz;    // Velocity components (m/s)
+    double mass;          // Projectile mass (kg)
+    double area;          // Cross-sectional area (m^2)
+    double cd;            // Drag coefficient
+} Projectile3DOF;
+
+// Barometric altitude atmosphere model
+double get_air_density(double altitude) {
+    double rho0 = 1.225; // Sea-level air density (kg/m^3)
+    double h0 = 8500.0;  // Scale height (m)
+    if (altitude < 0) return rho0;
+    return rho0 * exp(-altitude / h0);
+}
+
+void compute_accelerations(const Projectile3DOF* p, double latitude_rad, double* ax, double* ay, double* az) {
+    double speed = sqrt(p->vx * p->vx + p->vy * p->vy + p->vz * p->vz);
+    double rho = get_air_density(p->y);
+
+    double f_drag = 0.5 * rho * speed * speed * p->cd * p->area;
+    
+    double ax_drag = -(f_drag / p->mass) * (p->vx / speed);
+    double ay_drag = -(f_drag / p->mass) * (p->vy / speed);
+    double az_drag = -(f_drag / p->mass) * (p->vz / speed);
+
+    double omega_y = OMEGA_EARTH * sin(latitude_rad);
+    double omega_z = OMEGA_EARTH * cos(latitude_rad);
+
+    double ax_coriolis = -2.0 * (omega_y * p->vz - omega_z * p->vy);
+    double ay_coriolis = -2.0 * (-omega_z * p->vx);
+    double az_coriolis = -2.0 * (omega_y * p->vx);
+
+    // Total Accelerations (Gravity along -Y)
+    *ax = ax_drag + ax_coriolis;
+    *ay = -9.81 + ay_drag + ay_coriolis;
+    *az = az_drag + az_coriolis;
+}
+
+void step_euler_cromer(Projectile3DOF* p, double latitude_rad, double dt) {
+    double ax, ay, az;
+    compute_accelerations(p, latitude_rad, &ax, &ay, &az);
+
+    // Euler-Cromer Integration (Update velocity first, then position)
+    p->vx += ax * dt;
+    p->vy += ay * dt;
+    p->vz += az * dt;
+
+    p->x += p->vx * dt;
+    p->y += p->vy * dt;
+    p->z += p->vz * dt;
+}
+
+int main() {
+    // High-caliber ballistic shell launch simulation
+    Projectile3DOF shell = {
+        .x = 0.0, .y = 0.0, .z = 0.0,
+        .vx = 700.0, .vy = 500.0, .vz = 50.0, // Initial launch velocities (m/s)
+        .mass = 45.0,                         // Mass in kg
+        .area = 0.0182,                       // Caliber area
+        .cd = 0.295                           // Aerodynamic coefficient
+    };
+
+    double latitude = 45.0 * (M_PI / 180.0); // 45 Degrees North
+    double dt = 0.05;
+    double t = 0.0;
+
+    printf("Simulating Chronos 3-DOF Projectile Trajectory...\n");
+    while (shell.y >= 0.0 && t < 100.0) {
+        if ((int)(t * 10) % 20 == 0) {
+            printf("Time: %5.1fs | Pos (X,Y,Z): (%8.1fm, %8.1fm, %8.1fm) | Velocity: %.1fm/s\n",
+                   t, shell.x, shell.y, shell.z, 
+                   sqrt(shell.vx*shell.vx + shell.vy*shell.vy + shell.vz*shell.vz));
+        }
+        step_euler_cromer(&shell, latitude, dt);
+        t += dt;
+    }
+    return 0;
+}
